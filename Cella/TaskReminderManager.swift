@@ -1,28 +1,29 @@
-/*
- * Cella (层隅)
- * Copyright (C) 2024-2026 Cella Contributors
- *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program. If not, see <https://www.gnu.org/licenses/>.
- */
-
 import Foundation
 import os.log
 
 private let taskReminderLog = OSLog(subsystem: "com.cella.tasknote", category: "TaskReminder")
 
-/// `~/Documents/cella/task-note/` — local storage directory for task files.
+/// iCloud container identifier — shared with brew.app so task data stays
+/// consistent across both apps.
+private let kICloudContainerID = "iCloud.com.brew.app"
+
+/// Subpath inside the ubiquity container's Documents scope.
+private let kICloudSubpath = "task-note"
+
+/// Local storage for Cella: `~/Documents/cella/task-note/`.
 private let kCellaStorageSubpath = "cella/task-note"
+
+/// Legacy brew.app local path: `~/Documents/brew/task-note/`.
+/// On first launch, Cella migrates any tasks found here into its own storage.
+private let kBrewStorageSubpath = "brew/task-note"
+
+/// UserDefaults flag — user may opt out of iCloud.
+private let kUserOptedOutOfiCloudKey = "CellaTaskNoteOptedOutOfICloud"
+
+/// Set after brew→cella migration completes so we don't re-import.
+private let kLegacyBrewMigrationDoneKey = "CellaTaskNoteLegacyBrewMigrationDone"
+
+// MARK: - Models
 
 /// A single sub-item nested under a task.
 struct TaskSubItem: Identifiable, Codable, Equatable {
@@ -43,9 +44,9 @@ struct TaskSubItem: Identifiable, Codable, Equatable {
 
 /// A single task/reminder item.
 ///
-/// A task may carry a list of `subitems` — smaller breakdown steps. Completing
-/// a parent task automatically completes all of its sub-items; completing a
-/// sub-item does not affect the parent.
+/// A task may carry a list of `subitems`. Completing a parent task
+/// automatically completes all of its sub-items; completing a sub-item
+/// does not affect the parent.
 struct TaskReminder: Identifiable, Codable, Equatable {
     let id: UUID
     var title: String
@@ -67,8 +68,6 @@ struct TaskReminder: Identifiable, Codable, Equatable {
         case id, title, createdAt, completed, completedAt, subitems
     }
 
-    /// Custom decoder so JSON files written before the `subitems` field
-    /// existed still load (defaulting to an empty array).
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(UUID.self, forKey: .id)
@@ -80,24 +79,61 @@ struct TaskReminder: Identifiable, Codable, Equatable {
     }
 }
 
-/// Singleton manager for task reminders.
+/// Observable view of the iCloud sync state.
+enum TaskReminderSyncState: Equatable {
+    case signedIn
+    case signedOut
+    case temporarilyLocal
+    case downloadingFiles
+    case unknown
+
+    var description: String {
+        switch self {
+        case .signedIn:         return "Synced via iCloud"
+        case .signedOut:        return "iCloud signed out — stored locally"
+        case .temporarilyLocal: return "iCloud disabled — stored locally"
+        case .downloadingFiles: return "Downloading from iCloud…"
+        case .unknown:          return "Checking iCloud…"
+        }
+    }
+}
+
+// MARK: - Manager
+
+/// Singleton manager for task reminders with iCloud sync.
 ///
 /// Tasks are persisted as JSON files, one per calendar day (e.g. `2026-09-05.json`).
-/// Each file contains the array of tasks created on that day. Marking a task
-/// complete only flips the `completed` flag — it never deletes the record.
-/// Data is only removed when the user explicitly deletes a single task.
+/// Marking a task complete only flips the `completed` flag — it never deletes
+/// the record. Data is only removed when the user explicitly deletes a task.
 ///
-/// Storage lives in `~/Documents/cella/task-note/`.
+/// **Storage.** iCloud (ubiquity container) when available and opted in,
+/// otherwise `~/Documents/cella/task-note/`.
+///
+/// **Migration.** On first launch, any tasks in brew.app's local directory
+/// (`~/Documents/brew/task-note/`) are copied into Cella's active storage.
 final class TaskReminderManager: ObservableObject {
     static let shared = TaskReminderManager()
 
     @Published private(set) var tasks: [TaskReminder] = []
+    @Published private(set) var lastSyncedAt: Date?
+    @Published private(set) var iCloudSyncState: TaskReminderSyncState = .unknown
 
-    private let storageDirectory: URL
+    @Published var userOptedOutOfiCloud: Bool {
+        didSet {
+            UserDefaults.standard.set(userOptedOutOfiCloud, forKey: kUserOptedOutOfiCloudKey)
+            let optedOut = userOptedOutOfiCloud
+            ioQueue.async { [weak self] in
+                self?.refreshSyncState(optedOut: optedOut)
+                self?.rebuildStorageAfterToggle()
+            }
+        }
+    }
+
+    private let cellaLocalDirectory: URL
+    private let brewLegacyDirectory: URL
+    private var resolvedStorageDirectory: URL
     private let ioQueue = DispatchQueue(label: "com.cella.tasknote.io")
 
-    /// Date formatter for naming day-files (`YYYY-MM-DD.json`).
-    /// **Must only be accessed from `ioQueue`.**
     private let dateFormatter: DateFormatter = {
         let f = DateFormatter()
         f.dateFormat = "yyyy-MM-dd"
@@ -105,12 +141,64 @@ final class TaskReminderManager: ObservableObject {
         return f
     }()
 
+    private var metadataQuery: NSMetadataQuery?
+    private var metadataObservers: [NSObjectProtocol] = []
+    private var identityChangeObserver: NSObjectProtocol?
+
     private init() {
         let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-        storageDirectory = docs.appendingPathComponent(kCellaStorageSubpath, isDirectory: true)
-        ensureDirectoryExists(at: storageDirectory)
+        cellaLocalDirectory = docs.appendingPathComponent(kCellaStorageSubpath, isDirectory: true)
+        brewLegacyDirectory = docs.appendingPathComponent(kBrewStorageSubpath, isDirectory: true)
+        resolvedStorageDirectory = cellaLocalDirectory
+        userOptedOutOfiCloud = UserDefaults.standard.bool(forKey: kUserOptedOutOfiCloudKey)
+
+        ensureDirectoryExists(at: cellaLocalDirectory)
+
         ioQueue.async { [weak self] in
-            self?.reconcileAtStartup()
+            guard let self else { return }
+            self.migrateFromBrewIfNeeded()
+            self.refreshSyncState(optedOut: UserDefaults.standard.bool(forKey: kUserOptedOutOfiCloudKey))
+            self.rebuildStorageAfterToggle()
+            self.reconcileAtStartup()
+            self.startWatchingIfNeeded()
+        }
+
+        identityChangeObserver = NotificationCenter.default.addObserver(
+            forName: .NSUbiquityIdentityDidChange, object: nil, queue: .main
+        ) { [weak self] _ in
+            guard let self else { return }
+            let optedOut = self.userOptedOutOfiCloud
+            self.ioQueue.async {
+                self.refreshSyncState(optedOut: optedOut)
+                self.rebuildStorageAfterToggle()
+                self.reconcileAtStartup()
+                self.startWatchingIfNeeded()
+            }
+        }
+    }
+
+    deinit {
+        if let identityChangeObserver { NotificationCenter.default.removeObserver(identityChangeObserver) }
+        stopWatching()
+    }
+
+    // MARK: - Migration from brew.app
+
+    /// One-time migration: copy brew.app's local task files into Cella's
+    /// active storage so existing tasks carry over.
+    private func migrateFromBrewIfNeeded() {
+        guard !UserDefaults.standard.bool(forKey: kLegacyBrewMigrationDoneKey) else { return }
+        guard FileManager.default.fileExists(atPath: brewLegacyDirectory.path) else {
+            UserDefaults.standard.set(true, forKey: kLegacyBrewMigrationDoneKey)
+            return
+        }
+        let target = resolveStorageDirectory(optedOut: UserDefaults.standard.bool(forKey: kUserOptedOutOfiCloudKey))
+        ensureDirectoryExists(at: target)
+        if copyContents(of: brewLegacyDirectory, into: target) {
+            UserDefaults.standard.set(true, forKey: kLegacyBrewMigrationDoneKey)
+            os_log(.info, log: taskReminderLog, "Migrated brew.app tasks to Cella storage")
+        } else {
+            os_log(.error, log: taskReminderLog, "brew→cella migration incomplete — will retry next launch")
         }
     }
 
@@ -124,7 +212,6 @@ final class TaskReminderManager: ObservableObject {
         ioQueue.async { [weak self] in self?.saveTask(task) }
     }
 
-    /// When a task is marked complete, all sub-items are auto-completed.
     func toggleCompleted(_ task: TaskReminder) {
         guard let index = tasks.firstIndex(where: { $0.id == task.id }) else { return }
         tasks[index].completed.toggle()
@@ -153,7 +240,6 @@ final class TaskReminderManager: ObservableObject {
         ioQueue.async { [weak self] in self?.saveTask(updated) }
     }
 
-    /// Completing a sub-item does NOT affect the parent task.
     func toggleSubItemCompleted(task: TaskReminder, subItem: TaskSubItem) {
         guard let index = tasks.firstIndex(where: { $0.id == task.id }),
               let subIndex = tasks[index].subitems.firstIndex(where: { $0.id == subItem.id }) else { return }
@@ -176,6 +262,10 @@ final class TaskReminderManager: ObservableObject {
         ioQueue.async { [weak self] in self?.removeTaskFromFile(task) }
     }
 
+    func forceReconcile() {
+        ioQueue.async { [weak self] in self?.reconcileAtStartup() }
+    }
+
     // MARK: - Sorting
 
     var sortedTasks: [TaskReminder] {
@@ -187,6 +277,58 @@ final class TaskReminderManager: ObservableObject {
 
     var pendingCount: Int { tasks.filter { !$0.completed }.count }
 
+    // MARK: - Storage resolution
+
+    private func rebuildStorageAfterToggle() {
+        let priorDirectory = resolvedStorageDirectory
+        let newDir = resolveStorageDirectory(
+            optedOut: UserDefaults.standard.bool(forKey: kUserOptedOutOfiCloudKey)
+        )
+        if newDir == priorDirectory { return }
+        ensureDirectoryExists(at: newDir)
+        if isUbiquityContainer(priorDirectory) && !isUbiquityContainer(newDir) {
+            _ = copyContents(of: priorDirectory, into: newDir)
+        }
+        resolvedStorageDirectory = newDir
+        reconcileAtStartup()
+        startWatchingIfNeeded()
+    }
+
+    private func resolveStorageDirectory(optedOut: Bool) -> URL {
+        if optedOut { return cellaLocalDirectory }
+        if let ubiquityDir = ubiquityContainerTaskNoteDirectory() { return ubiquityDir }
+        return cellaLocalDirectory
+    }
+
+    private func ubiquityContainerTaskNoteDirectory() -> URL? {
+        guard FileManager.default.ubiquityIdentityToken != nil else { return nil }
+        guard let containerRoot = FileManager.default.url(forUbiquityContainerIdentifier: kICloudContainerID) else {
+            os_log(.info, log: taskReminderLog, "iCloud container unavailable — falling back to local")
+            return nil
+        }
+        let docs = containerRoot.appendingPathComponent("Documents", isDirectory: true)
+        return docs.appendingPathComponent(kICloudSubpath, isDirectory: true)
+    }
+
+    private func isUbiquityContainer(_ url: URL) -> Bool {
+        url.path.contains("Mobile Documents") && url.path.contains("iCloud")
+    }
+
+    private func refreshSyncState(optedOut: Bool) {
+        let token = FileManager.default.ubiquityIdentityToken
+        let state: TaskReminderSyncState
+        if optedOut {
+            state = .temporarilyLocal
+        } else if token == nil {
+            state = .signedOut
+        } else if ubiquityContainerTaskNoteDirectory() != nil {
+            state = .signedIn
+        } else {
+            state = .signedOut
+        }
+        DispatchQueue.main.async { [weak self] in self?.iCloudSyncState = state }
+    }
+
     // MARK: - File helpers (all on ioQueue)
 
     private func ensureDirectoryExists(at url: URL) {
@@ -194,14 +336,35 @@ final class TaskReminderManager: ObservableObject {
             do {
                 try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
             } catch {
-                os_log(.error, log: taskReminderLog, "Failed to create storage directory: %{public}@", error.localizedDescription)
+                os_log(.error, log: taskReminderLog, "Failed to create directory: %{public}@", error.localizedDescription)
             }
         }
     }
 
+    private func copyContents(of src: URL, into dst: URL) -> Bool {
+        ensureDirectoryExists(at: dst)
+        guard let entries = try? FileManager.default.contentsOfDirectory(
+            at: src, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles]
+        ) else { return false }
+        var ok = true
+        for entry in entries where entry.pathExtension == "json" {
+            let target = dst.appendingPathComponent(entry.lastPathComponent)
+            do {
+                if FileManager.default.fileExists(atPath: target.path) {
+                    try FileManager.default.removeItem(at: target)
+                }
+                try FileManager.default.copyItem(at: entry, to: target)
+            } catch {
+                os_log(.error, log: taskReminderLog, "Copy failed: %{public}@", error.localizedDescription)
+                ok = false
+            }
+        }
+        return ok
+    }
+
     private func fileURL(for date: Date) -> URL {
         let filename = dateFormatter.string(from: date) + ".json"
-        return storageDirectory.appendingPathComponent(filename)
+        return resolvedStorageDirectory.appendingPathComponent(filename)
     }
 
     private func saveTask(_ task: TaskReminder) {
@@ -213,6 +376,7 @@ final class TaskReminderManager: ObservableObject {
             dayTasks.insert(task, at: 0)
         }
         writeDayTasks(dayTasks, to: url)
+        noteSyncTimestamp()
     }
 
     private func removeTaskFromFile(_ task: TaskReminder) {
@@ -220,36 +384,62 @@ final class TaskReminderManager: ObservableObject {
         var dayTasks = loadDayTasks(from: url)
         dayTasks.removeAll { $0.id == task.id }
         if dayTasks.isEmpty {
-            do {
-                if FileManager.default.fileExists(atPath: url.path) {
-                    try FileManager.default.removeItem(at: url)
+            let coordinator = NSFileCoordinator()
+            var coordError: NSError?
+            coordinator.coordinate(writingItemAt: url, options: [.forDeleting], error: &coordError) { coordinatedURL in
+                do {
+                    if FileManager.default.fileExists(atPath: coordinatedURL.path) {
+                        try FileManager.default.removeItem(at: coordinatedURL)
+                    }
+                } catch {
+                    os_log(.error, log: taskReminderLog, "Remove failed: %{public}@", error.localizedDescription)
                 }
-            } catch {
-                os_log(.error, log: taskReminderLog, "Failed to remove day file: %{public}@", error.localizedDescription)
+            }
+            if let coordError {
+                os_log(.error, log: taskReminderLog, "Coordination failed: %{public}@", coordError.localizedDescription)
             }
         } else {
             writeDayTasks(dayTasks, to: url)
         }
+        noteSyncTimestamp()
     }
 
     private func loadDayTasks(from url: URL) -> [TaskReminder] {
-        guard let data = try? Data(contentsOf: url) else { return [] }
-        if let decoded = try? JSONDecoder().decode([TaskReminder].self, from: data) { return decoded }
-        if let text = String(data: data, encoding: .utf8), text.isEmpty { return [] }
-        return []
+        let coordinator = NSFileCoordinator()
+        var result: [TaskReminder] = []
+        var coordError: NSError?
+        coordinator.coordinate(readingItemAt: url, options: [.resolvesSymbolicLink], error: &coordError) { readURL in
+            guard let data = try? Data(contentsOf: readURL) else { return }
+            if let decoded = try? JSONDecoder().decode([TaskReminder].self, from: data) {
+                result = decoded
+            } else if let text = String(data: data, encoding: .utf8), text.isEmpty {
+                result = []
+            }
+        }
+        if let coordError {
+            os_log(.error, log: taskReminderLog, "Read coordination failed: %{public}@", coordError.localizedDescription)
+        }
+        return result
     }
 
     private func writeDayTasks(_ tasks: [TaskReminder], to url: URL) {
-        do {
-            let data = try JSONEncoder().encode(tasks)
-            try data.write(to: url, options: .atomic)
-        } catch {
-            os_log(.error, log: taskReminderLog, "Failed to write day file: %{public}@", error.localizedDescription)
+        let coordinator = NSFileCoordinator()
+        var coordError: NSError?
+        coordinator.coordinate(writingItemAt: url, options: [.forReplacing], error: &coordError) { writeURL in
+            do {
+                let data = try JSONEncoder().encode(tasks)
+                try data.write(to: writeURL, options: .atomic)
+            } catch {
+                os_log(.error, log: taskReminderLog, "Write failed: %{public}@", error.localizedDescription)
+            }
+        }
+        if let coordError {
+            os_log(.error, log: taskReminderLog, "Write coordination failed: %{public}@", coordError.localizedDescription)
         }
     }
 
     private func reconcileAtStartup() {
-        let dir = storageDirectory
+        let dir = resolvedStorageDirectory
         guard let fileURLs = try? FileManager.default.contentsOfDirectory(
             at: dir, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles]
         ) else { return }
@@ -266,6 +456,56 @@ final class TaskReminderManager: ObservableObject {
             }
         }
         let sorted = Array(dedupedById.values).sorted { $0.createdAt > $1.createdAt }
-        DispatchQueue.main.async { [weak self] in self?.tasks = sorted }
+        DispatchQueue.main.async { [weak self] in
+            self?.tasks = sorted
+            self?.noteSyncTimestampNow()
+        }
+    }
+
+    private func noteSyncTimestamp() {
+        DispatchQueue.main.async { [weak self] in self?.noteSyncTimestampNow() }
+    }
+
+    private func noteSyncTimestampNow() {
+        lastSyncedAt = Date()
+    }
+
+    // MARK: - iCloud change watching
+
+    private func startWatchingIfNeeded() {
+        let dir = resolvedStorageDirectory
+        guard isUbiquityContainer(dir) else { stopWatching(); return }
+        if metadataQuery == nil {
+            let q = NSMetadataQuery()
+            q.searchScopes = [NSMetadataQueryUbiquitousDocumentsScope]
+            q.valueListAttributes = []
+            q.predicate = NSPredicate(format: "%K BEGINSWITH %@", NSMetadataItemPathKey, resolvedStorageDirectory.path)
+            metadataQuery = q
+            installMetadataObserver(for: q)
+            q.start()
+            return
+        }
+        if let query = metadataQuery {
+            query.predicate = NSPredicate(format: "%K BEGINSWITH %@", NSMetadataItemPathKey, resolvedStorageDirectory.path)
+            query.stop()
+            query.start()
+        }
+    }
+
+    private func stopWatching() {
+        metadataQuery?.stop()
+        metadataQuery = nil
+        for observer in metadataObservers { NotificationCenter.default.removeObserver(observer) }
+        metadataObservers.removeAll()
+    }
+
+    private func installMetadataObserver(for query: NSMetadataQuery) {
+        let initial = NotificationCenter.default.addObserver(
+            forName: .NSMetadataQueryDidFinishGathering, object: query, queue: nil
+        ) { [weak self] _ in self?.ioQueue.async { self?.reconcileAtStartup() } }
+        let update = NotificationCenter.default.addObserver(
+            forName: .NSMetadataQueryDidUpdate, object: query, queue: nil
+        ) { [weak self] _ in self?.ioQueue.async { self?.reconcileAtStartup() } }
+        metadataObservers = [initial, update]
     }
 }

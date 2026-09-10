@@ -8,6 +8,7 @@ struct TaskPanelView: View {
     @State private var inputText: String = ""
     @State private var hoveredTaskId: UUID?
     @State private var isHeaderHovered: Bool = false
+    @State private var hoveringSync: Bool = false
     @FocusState private var isInputFocused: Bool
 
     var body: some View {
@@ -58,6 +59,8 @@ struct TaskPanelView: View {
                     .clipShape(Capsule())
             }
 
+            iCloudSyncBadge
+
             Spacer()
 
             if isHeaderHovered {
@@ -80,6 +83,49 @@ struct TaskPanelView: View {
         .padding(.top, PanelMetrics.contentInset)
         .onHover { isHeaderHovered = $0 }
         .animation(.easeOut(duration: 0.15), value: isHeaderHovered)
+    }
+
+    // MARK: - iCloud Sync Badge
+
+    private var iCloudSyncBadge: some View {
+        let (icon, color, label) = syncBadgeVisuals(for: manager.iCloudSyncState)
+        return Button {
+            withAnimation(.easeOut(duration: 0.15)) {
+                manager.userOptedOutOfiCloud.toggle()
+            }
+        } label: {
+            HStack(spacing: 3) {
+                Image(systemName: icon)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(color)
+                if hoveringSync {
+                    Text(label)
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .fixedSize()
+                }
+            }
+            .padding(.horizontal, 5)
+            .padding(.vertical, 2)
+            .background(hoveringSync ? Color.white.opacity(0.08) : Color.clear)
+            .clipShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .help(manager.iCloudSyncState.description)
+        .onHover { hoveringSync = $0 }
+        .animation(.easeOut(duration: 0.15), value: hoveringSync)
+        .transition(.opacity)
+    }
+
+    private func syncBadgeVisuals(for state: TaskReminderSyncState) -> (icon: String, color: Color, label: String) {
+        switch state {
+        case .signedIn:         return ("checkmark.icloud", Color.green, "云同步已开启")
+        case .signedOut:        return ("icloud.slash", Color.orange, "未登录 iCloud")
+        case .temporarilyLocal: return ("icloud.slash", Color.orange, "iCloud 已关闭")
+        case .downloadingFiles: return ("icloud.and.arrow.down", Color.blue, "正在下载…")
+        case .unknown:          return ("bolt.horizontal.icloud", Color.gray, "检测中…")
+        }
     }
 
     // MARK: - Input Field

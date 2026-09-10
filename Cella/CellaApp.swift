@@ -27,33 +27,55 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func setupStatusItem() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
-        if let button = statusItem.button {
-            button.image = NSImage(systemSymbolName: "checklist", accessibilityDescription: "Cella")
-            button.image?.isTemplate = true
-            button.action = #selector(togglePanel(_:))
-            button.target = self
-        }
+        guard let button = statusItem.button else { return }
 
-        // Right-click menu with Quit option.
-        let menu = NSMenu()
-        menu.addItem(NSMenuItem(title: "退出 Cella", action: #selector(quit), keyEquivalent: "q"))
-        statusItem.menu = menu
+        button.image = NSImage(systemSymbolName: "checklist", accessibilityDescription: "Cella")
+        button.image?.isTemplate = true
+
+        // Do NOT set statusItem.menu — if set, the button action is never
+        // called (the menu intercepts all clicks). Instead we handle left-click
+        // (toggle panel) and right-click (context menu) in the action.
+        button.target = self
+        button.action = #selector(statusItemClicked(_:))
+        button.sendAction(on: [.leftMouseUp, .rightMouseUp])
     }
 
-    @objc private func togglePanel(_ sender: Any?) {
-        panelManager?.togglePanel()
+    @objc private func statusItemClicked(_ sender: Any?) {
+        guard let event = NSApp.currentEvent, let button = statusItem.button else { return }
+        switch event.type {
+        case .rightMouseUp:
+            showContextMenu(for: button, with: event)
+        default:
+            panelManager?.togglePanel()
+        }
+    }
+
+    private func showContextMenu(for button: NSStatusBarButton, with event: NSEvent) {
+        let menu = NSMenu()
+        menu.addItem(NSMenuItem(title: "退出 层隅", action: #selector(quit), keyEquivalent: "q"))
+        menu.addItem(withTitle: "关于 Cella", action: #selector(showAbout), keyEquivalent: "")
+        NSMenu.popUpContextMenu(menu, with: event, for: button)
     }
 
     @objc private func quit() {
         NSApp.terminate(nil)
     }
+
+    @objc private func showAbout() {
+        let alert = NSAlert()
+        alert.messageText = "Cella 层隅"
+        alert.informativeText = "独立任务管理应用\n\n数据存储于 ~/Documents/cella/task-note/"
+        alert.alertStyle = .informational
+        alert.addButton(withTitle: "好")
+        alert.runModal()
+    }
 }
 
-/// Owns the floating NSPanel and coordinates its show/hide lifecycle with
-/// the menu bar status item. Clicking outside the panel dismisses it.
+/// Owns the floating panel window and coordinates its show/hide lifecycle
+/// with the menu bar status item. Clicking outside the panel dismisses it.
 final class PanelManager: NSObject, NSWindowDelegate {
     private let statusItem: NSStatusItem
-    private var panel: NSPanel?
+    private var window: NSWindow?
     private var eventMonitor: Any?
 
     init(statusItem: NSStatusItem) {
@@ -62,7 +84,7 @@ final class PanelManager: NSObject, NSWindowDelegate {
     }
 
     func togglePanel() {
-        if let panel, panel.isVisible {
+        if let window, window.isVisible {
             hidePanel()
         } else {
             showPanel()
@@ -70,49 +92,49 @@ final class PanelManager: NSObject, NSWindowDelegate {
     }
 
     private func showPanel() {
-        if panel == nil {
-            createPanel()
+        if window == nil {
+            createWindow()
         }
-        guard let panel else { return }
+        guard let window else { return }
 
-        // Position panel just below the menu bar item.
+        // Position the window just below the menu bar item.
         if let button = statusItem.button,
-           let window = button.window {
-            let buttonFrame = window.convertToScreen(button.frame)
+           let buttonWindow = button.window {
+            let buttonFrame = buttonWindow.convertToScreen(button.frame)
             let panelWidth = PanelMetrics.panelSize.width
             let x = buttonFrame.midX - panelWidth / 2
             let y = buttonFrame.minY - PanelMetrics.panelSize.height - 8
-            panel.setFrameOrigin(NSPoint(x: x, y: y))
+            window.setFrameOrigin(NSPoint(x: x, y: y))
         }
 
-        panel.makeKeyAndOrderFront(nil)
+        window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
         installEventMonitor()
     }
 
     private func hidePanel() {
-        panel?.orderOut(nil)
+        window?.orderOut(nil)
         removeEventMonitor()
     }
 
-    private func createPanel() {
+    private func createWindow() {
         let hosting = NSHostingController(rootView: TaskPanelView(onClose: { [weak self] in self?.hidePanel() }))
-        let panel = NSPanel(
+        let window = NSWindow(
             contentRect: NSRect(origin: .zero, size: PanelMetrics.panelSize),
-            styleMask: [.nonactivatingPanel, .borderless, .fullSizeContentView],
+            styleMask: [.borderless, .fullSizeContentView],
             backing: .buffered,
             defer: false
         )
-        panel.contentViewController = hosting
-        panel.isOpaque = false
-        panel.backgroundColor = .clear
-        panel.hasShadow = false
-        panel.level = .statusBar
-        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
-        panel.delegate = self
-        panel.isMovableByWindowBackground = false
-        panel.hidesOnDeactivate = false
-        self.panel = panel
+        window.contentViewController = hosting
+        window.isOpaque = false
+        window.backgroundColor = .clear
+        window.hasShadow = true
+        window.level = .statusBar
+        window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        window.delegate = self
+        window.isMovableByWindowBackground = false
+        window.hidesOnDeactivate = false
+        self.window = window
     }
 
     // MARK: - Outside-click dismissal
@@ -120,8 +142,8 @@ final class PanelManager: NSObject, NSWindowDelegate {
     private func installEventMonitor() {
         guard eventMonitor == nil else { return }
         eventMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] event in
-            guard let self, let panel = self.panel, panel.isVisible else { return }
-            if !NSPointInRect(event.locationInWindow, panel.frame) {
+            guard let self, let window = self.window, window.isVisible else { return }
+            if !NSPointInRect(event.locationInWindow, window.frame) {
                 self.hidePanel()
             }
         }
