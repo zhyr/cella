@@ -1,0 +1,23 @@
+# Xcode
+build/
+DerivedData/
+*.xcuserstate
+*.xcuserdatad/
+xcuserdata/
+*.xcscmblueprint
+*.xccheckout
+.DS_Store
+
+# Swift
+.build/
+.swiftpm/
+Package.resolved
+
+# macOS
+.AppleDouble
+.LSOverride
+Icon
+
+# IDE
+.vscode/
+.idea/

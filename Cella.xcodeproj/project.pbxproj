@@ -1,0 +1,282 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 56;
+	objects = {
+/* Begin PBXBuildFile section */
+		B8849483F7F740EFBCBC6BC8 /* CellaApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9466B3D1538B4D8CAB822A00 /* CellaApp.swift */; };
+		ECBB876A8C7F4883AA60D6BE /* TaskReminderManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9F36C633FCD2499D8C8D5FB8 /* TaskReminderManager.swift */; };
+		82DE1AA3ECCC4D45BB44E12B /* TaskPanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = ED942849AC87476F89189E0B /* TaskPanelView.swift */; };
+		851C75F6FCFA4BDFA9F40EA1 /* VisualEffectView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FD1AB5D485184F739089D5D0 /* VisualEffectView.swift */; };
+		E35895EB8FAB4C47AE8CB127 /* PanelMetrics.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9BC43E40A2A6474090412EF9 /* PanelMetrics.swift */; };
+		9AC31FA591C14583BE8162BD /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = B9F22DD48BB5495D97A895A7 /* Assets.xcassets */; };
+/* End PBXBuildFile section */
+/* Begin PBXFileReference section */
+		6479A78C70474667B33A3554 /* Cella.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Cella.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		9466B3D1538B4D8CAB822A00 /* CellaApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CellaApp.swift; sourceTree = "<group>"; };
+		9F36C633FCD2499D8C8D5FB8 /* TaskReminderManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskReminderManager.swift; sourceTree = "<group>"; };
+		ED942849AC87476F89189E0B /* TaskPanelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskPanelView.swift; sourceTree = "<group>"; };
+		FD1AB5D485184F739089D5D0 /* VisualEffectView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VisualEffectView.swift; sourceTree = "<group>"; };
+		9BC43E40A2A6474090412EF9 /* PanelMetrics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PanelMetrics.swift; sourceTree = "<group>"; };
+		B9F22DD48BB5495D97A895A7 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		9BB911294C084603A6834812 /* Cella.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Cella.entitlements; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+/* Begin PBXFrameworksBuildPhase section */
+		6FCE5003D3414379BFA06D56 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+/* Begin PBXGroup section */
+		567D84C6940E479591E88C61 = {
+			isa = PBXGroup;
+			children = (
+				82F0BC3C6834496BAFE9AC1D /* Cella */,
+				EDAB5ACCBD144A6083CA2C53 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		82F0BC3C6834496BAFE9AC1D /* Cella */ = {
+			isa = PBXGroup;
+			children = (
+				9466B3D1538B4D8CAB822A00 /* CellaApp.swift */,
+				9F36C633FCD2499D8C8D5FB8 /* TaskReminderManager.swift */,
+				ED942849AC87476F89189E0B /* TaskPanelView.swift */,
+				FD1AB5D485184F739089D5D0 /* VisualEffectView.swift */,
+				9BC43E40A2A6474090412EF9 /* PanelMetrics.swift */,
+				B9F22DD48BB5495D97A895A7 /* Assets.xcassets */,
+				9BB911294C084603A6834812 /* Cella.entitlements */,
+			);
+			path = Cella;
+			sourceTree = "<group>";
+		};
+		EDAB5ACCBD144A6083CA2C53 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				6479A78C70474667B33A3554 /* Cella.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+/* Begin PBXNativeTarget section */
+		8FF183B08F084862A839B9AD /* Cella */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 2F3F968ABB3E4144BDB0B45E /* Build configuration list for PBXNativeTarget "Cella" */;
+			buildPhases = (
+				B465E38D23CD497697607DAC /* Sources */,
+				6FCE5003D3414379BFA06D56 /* Frameworks */,
+				B21D19EDA2BD4FA7A1C0F54C /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = Cella;
+			productName = Cella;
+			productReference = 6479A78C70474667B33A3554 /* Cella.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+/* Begin PBXProject section */
+		592E68017C1843E0BFCA8F75 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 1500;
+				LastUpgradeCheck = 1500;
+				TargetAttributes = {
+					8FF183B08F084862A839B9AD = {
+						CreatedOnToolsVersion = 15.0;
+					};
+				};
+			};
+			buildConfigurationList = BDEFBB53D54245EE8AE6FC92 /* Build configuration list for PBXProject "Cella" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = 567D84C6940E479591E88C61;
+			productRefGroup = EDAB5ACCBD144A6083CA2C53 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				8FF183B08F084862A839B9AD /* Cella */,
+			);
+		};
+/* End PBXProject section */
+/* Begin PBXResourcesBuildPhase section */
+		B21D19EDA2BD4FA7A1C0F54C /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				9AC31FA591C14583BE8162BD /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+/* Begin PBXSourcesBuildPhase section */
+		B465E38D23CD497697607DAC /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				B8849483F7F740EFBCBC6BC8 /* CellaApp.swift in Sources */,
+				ECBB876A8C7F4883AA60D6BE /* TaskReminderManager.swift in Sources */,
+				82DE1AA3ECCC4D45BB44E12B /* TaskPanelView.swift in Sources */,
+				851C75F6FCFA4BDFA9F40EA1 /* VisualEffectView.swift in Sources */,
+				E35895EB8FAB4C47AE8CB127 /* PanelMetrics.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+/* Begin XCBuildConfiguration section */
+		01743A51919344E286A06526 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = macosx;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		76CFFDD4746F4FD89E1A2348 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				SDKROOT = macosx;
+				SWIFT_COMPILATION_MODE = wholemodule;
+			};
+			name = Release;
+		};
+		1723B86AAA374353BE081ED7 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = Cella/Cella.entitlements;
+				CODE_SIGN_IDENTITY = "-";
+				CODE_SIGN_STYLE = Manual;
+				CODE_SIGNING_ALLOWED = NO;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "";
+				ENABLE_APP_SANDBOX = NO;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = "层隅";
+				INFOPLIST_KEY_CFBundleName = Cella;
+				INFOPLIST_KEY_LSUIElement = YES;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.cella.app;
+				PRODUCT_NAME = Cella;
+				SDKROOT = macosx;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		9D2D26491F6A4B0BA013A024 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = Cella/Cella.entitlements;
+				CODE_SIGN_IDENTITY = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = "层隅";
+				INFOPLIST_KEY_CFBundleName = Cella;
+				INFOPLIST_KEY_LSUIElement = YES;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.cella.app;
+				PRODUCT_NAME = Cella;
+				SDKROOT = macosx;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+/* Begin XCConfigurationList section */
+		BDEFBB53D54245EE8AE6FC92 /* Build configuration list for PBXProject "Cella" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				01743A51919344E286A06526 /* Debug */,
+				76CFFDD4746F4FD89E1A2348 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		2F3F968ABB3E4144BDB0B45E /* Build configuration list for PBXNativeTarget "Cella" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				1723B86AAA374353BE081ED7 /* Debug */,
+				9D2D26491F6A4B0BA013A024 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = 592E68017C1843E0BFCA8F75 /* Project object */;
+}
