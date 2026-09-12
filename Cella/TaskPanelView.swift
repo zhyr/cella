@@ -67,7 +67,12 @@ struct TaskPanelView: View {
         }
         .frame(width: PanelMetrics.panelSize.width, height: PanelMetrics.panelSize.height)
         .background {
-            VisualEffectView(material: .hudWindow, blendingMode: .behindWindow)
+            VisualEffectView(
+                material: .hudWindow,
+                blendingMode: .behindWindow,
+                cornerRadius: PanelMetrics.cornerRadius,
+                maskSize: PanelMetrics.panelSize
+            )
                 .overlay {
                     LinearGradient(
                         colors: [Color.white.opacity(0.07), Color.clear],
@@ -82,7 +87,11 @@ struct TaskPanelView: View {
             RoundedRectangle(cornerRadius: PanelMetrics.cornerRadius, style: .continuous)
                 .strokeBorder(Color.white.opacity(0.12), lineWidth: 1)
         }
-        .shadow(color: .black.opacity(0.4), radius: 26, x: 0, y: 12)
+        // No SwiftUI `.shadow` here on purpose. The panel fills the window
+        // exactly, so a SwiftUI shadow is clipped at the window edge everywhere
+        // except the four transparent corner cut-outs — where it paints a grey
+        // wedge with a hard edge. The drop shadow comes from the window itself
+        // (`hasShadow`), which now traces the rounded mask instead.
         .animation(.easeOut(duration: 0.18), value: manager.tasks.count)
         .animation(.easeOut(duration: 0.2), value: manager.undoableDeletion?.id)
     }
@@ -561,6 +570,7 @@ struct TaskRow: View {
                 .contentShape(Rectangle())
                 .onTapGesture(count: 2) { beginTitleEdit() }
                 .help("双击可编辑")
+                .blocksWindowBackgroundDrag()
         }
     }
 
@@ -966,6 +976,7 @@ struct SubItemRow: View {
                 .contentShape(Rectangle())
                 .onTapGesture(count: 2) { beginTitleEdit() }
                 .help("双击可编辑")
+                .blocksWindowBackgroundDrag()
         }
     }
 
@@ -1069,5 +1080,32 @@ struct SubItemRow: View {
             f.dateFormat = "yyyy/MM/dd"
         }
         return f.string(from: date)
+    }
+}
+
+// MARK: - Window background drag opt-out
+
+/// Makes the view it backs keep its own mouse gestures instead of handing the
+/// mouse-down to the panel's "drag anywhere by the background" behaviour.
+///
+/// The panel sets `isMovableByWindowBackground`, which makes AppKit claim the
+/// mouse-down on any region whose hit-tested `NSView` allows it — including
+/// plain SwiftUI views that carry a gesture. Without this, the
+/// double-click-to-edit on a task title would be swallowed by a window drag.
+/// Controls (text fields, buttons, scroll views) opt out on their own.
+private struct WindowBackgroundDragBlocker: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView { BlockerView() }
+    func updateNSView(_ nsView: NSView, context: Context) {}
+
+    private final class BlockerView: NSView {
+        override var mouseDownCanMoveWindow: Bool { false }
+    }
+}
+
+private extension View {
+    /// Keep the wrapped view's own mouse gestures from being turned into a
+    /// window drag.
+    func blocksWindowBackgroundDrag() -> some View {
+        background(WindowBackgroundDragBlocker())
     }
 }

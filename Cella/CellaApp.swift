@@ -18,12 +18,14 @@ struct CellaApp: App {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
     private var panelManager: PanelManager?
+    private var panelRequestObserver: NSObjectProtocol?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
         setupMainMenu()
         setupStatusItem()
         panelManager = PanelManager(statusItem: statusItem)
+        observePanelRequests()
 
         // 主动实例化任务管理器。它只在 `TaskPanelView` 里被引用，而面板窗口是点开
         // 图标时才创建的，所以不在这里提前触碰的话，用户没打开过面板之前既不会读取
@@ -44,6 +46,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         button.target = self
         button.action = #selector(statusItemClicked(_:))
         button.sendAction(on: [.leftMouseUp, .rightMouseUp])
+    }
+
+    /// 监听来自 Perch 的“唤起面板”请求。
+    ///
+    /// Perch 标题栏里的 Cella 图标靠一条分布式通知来唤起本面板：Cella 是
+    /// `LSUIElement` 应用，`activate` 不会让任何窗口出现，面板只能由 Cella 自己弹出。
+    /// 通知名与 Perch 侧 `openCellaApp()` 保持一致。
+    private func observePanelRequests() {
+        panelRequestObserver = DistributedNotificationCenter.default().addObserver(
+            forName: Notification.Name("com.cella.app.showPanel"),
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.panelManager?.showPanel()
+        }
     }
 
     @objc private func statusItemClicked(_ sender: Any?) {
@@ -141,23 +158,12 @@ final class PanelManager: NSObject, NSWindowDelegate {
         }
     }
 
-    private func showPanel() {
+    /// 显示面板。除状态栏图标左键外，Perch 的 Cella 图标也会通过分布式通知走到这里。
+    func showPanel() {
         if window == nil {
             createWindow()
         }
         guard let window else { return }
-
-        // Position the window just below the menu bar item, clamped to the
-        // screen so a status item near a display edge can't push it off-screen.
-        if let button = statusItem.button,
-           let buttonWindow = button.window {
-            let buttonFrame = buttonWindow.convertToScreen(button.frame)
-            let size = PanelMetrics.panelSize
-            let visible = (buttonWindow.screen ?? NSScreen.main)?.visibleFrame ?? buttonFrame
-            let x = min(max(buttonFrame.midX - size.width / 2, visible.minX + 8), visible.maxX - size.width - 8)
-            let y = max(buttonFrame.minY - size.height - 8, visible.minY + 8)
-            window.setFrameOrigin(NSPoint(x: x, y: y))
-        }
 
         window.makeKeyAndOrderFront(nil)
         window.orderFrontRegardless()
@@ -184,6 +190,53 @@ final class PanelManager: NSObject, NSWindowDelegate {
         window.contentViewController = hosting
         window.delegate = self
         self.window = window
+        placeInitialWindow(window)
+    }
+
+    // MARK: - Placement
+
+    /// Where the panel sits, remembered across launches once the user drags it.
+    private static let originDefaultsKey = "cella.panel.origin"
+
+    /// Origin the panel was last placed at by code. Compared in `windowDidMove`
+    /// so an automatic placement is never mistaken for a user drag.
+    private var programmaticOrigin: NSPoint?
+
+    /// First-show placement: at the last position the user dragged the panel to,
+    /// when that spot is still on a connected display; otherwise just below the
+    /// status item, clamped so a status item near a display edge can't push the
+    /// panel off-screen.
+    private func placeInitialWindow(_ window: NSWindow) {
+        let size = window.frame.size
+
+        if let saved = savedOrigin(), Self.isOnScreen(saved, size: size) {
+            setOriginProgrammatically(saved, on: window)
+            return
+        }
+
+        guard let button = statusItem.button, let buttonWindow = button.window else { return }
+        let buttonFrame = buttonWindow.convertToScreen(button.frame)
+        let visible = (buttonWindow.screen ?? NSScreen.main)?.visibleFrame ?? buttonFrame
+        let x = min(max(buttonFrame.midX - size.width / 2, visible.minX + 8), visible.maxX - size.width - 8)
+        let y = max(buttonFrame.minY - size.height - 8, visible.minY + 8)
+        setOriginProgrammatically(NSPoint(x: x, y: y), on: window)
+    }
+
+    private func savedOrigin() -> NSPoint? {
+        guard let string = UserDefaults.standard.string(forKey: Self.originDefaultsKey) else { return nil }
+        return NSPointFromString(string)
+    }
+
+    /// A saved origin only counts if the panel would still land on a display —
+    /// the screen it was recorded on may have been unplugged since.
+    private static func isOnScreen(_ origin: NSPoint, size: NSSize) -> Bool {
+        let frame = NSRect(origin: origin, size: size)
+        return NSScreen.screens.contains { $0.visibleFrame.intersects(frame) }
+    }
+
+    private func setOriginProgrammatically(_ origin: NSPoint, on window: NSWindow) {
+        programmaticOrigin = origin
+        window.setFrameOrigin(origin)
     }
 
     // MARK: - Outside-click dismissal
@@ -225,6 +278,14 @@ final class PanelManager: NSObject, NSWindowDelegate {
     func windowWillClose(_ notification: Notification) {
         removeEventMonitor()
     }
+
+    /// Remember where the user dragged the panel so the next launch reopens it
+    /// there. Programmatic placements are filtered out so the initial anchor
+    /// doesn't overwrite a position the user chose earlier.
+    func windowDidMove(_ notification: Notification) {
+        guard let window, window.frame.origin != programmaticOrigin else { return }
+        UserDefaults.standard.set(NSStringFromPoint(window.frame.origin), forKey: Self.originDefaultsKey)
+    }
 }
 
 /// Borderless floating panel that hosts the task UI.
@@ -249,7 +310,11 @@ final class TaskPanel: NSPanel {
         backgroundColor = .clear
         hasShadow = true
         level = .statusBar
-        isMovableByWindowBackground = false
+        // Borderless panel: there is no title bar to grab, so let the whole
+        // background work as a drag handle. AppKit still routes clicks that land
+        // on a control (text field, button) to that control first, so editing is
+        // unaffected.
+        isMovableByWindowBackground = true
         hidesOnDeactivate = false
         acceptsMouseMovedEvents = true
         collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary]
