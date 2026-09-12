@@ -1,5 +1,6 @@
 # Xcode
 build/
+build-signed/
 DerivedData/
 *.xcuserstate
 *.xcuserdatad/
@@ -21,3 +22,13 @@ Icon
 # IDE
 .vscode/
 .idea/
+
+# 签名 / 公证凭据（含私密信息，仅保留模板）
+.env
+.env.*
+!.env.example
+
+# 发布产物
+release/
+*.dmg
+*.pkg
