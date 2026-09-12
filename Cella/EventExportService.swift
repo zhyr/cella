@@ -59,9 +59,13 @@ enum EventExportError: LocalizedError {
 /// rather than at launch: a task list has no business asking for calendar
 /// access before the user has shown any interest in using it.
 ///
-/// Cella is not sandboxed, so the `com.apple.security.personal-information.*`
-/// entitlements do not apply here — the `NS…UsageDescription` strings in
-/// Info.plist are what the system shows in the permission alert.
+/// Cella is not sandboxed, but it is notarized with the hardened runtime, and
+/// the hardened runtime treats Calendar as a protected resource: the
+/// `com.apple.security.personal-information.calendars` entitlement is required,
+/// otherwise EventKit reports "no access" without ever asking the user. With it
+/// in place the `NS…UsageDescription` strings in Info.plist are what the system
+/// shows in the permission alert. Reminders has no equivalent entitlement, so
+/// it is gated by TCC and its usage string alone.
 enum EventExportService {
     private static let store = EKEventStore()
 

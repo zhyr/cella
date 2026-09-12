@@ -46,6 +46,15 @@ struct TaskPanelView: View {
     @ObservedObject private var manager = TaskReminderManager.shared
     @State private var inputText: String = ""
     @State private var hoveredTaskId: UUID?
+    /// Tasks whose sub-item lists the user folded away. Absence means expanded,
+    /// so a task opens by default and only an explicit collapse is remembered.
+    ///
+    /// Held here rather than inside `TaskRow` on purpose: the list is a
+    /// `LazyVStack`, so a row that scrolls out of view is torn down and its own
+    /// `@State` would go with it — the list would spring back open on the way
+    /// back. The panel's hosting controller is created once, so this survives
+    /// both scrolling and closing the panel.
+    @State private var collapsedTaskIDs: Set<UUID> = []
     @State private var isHeaderHovered: Bool = false
     @State private var hoveringSync: Bool = false
     @FocusState private var isInputFocused: Bool
@@ -272,6 +281,7 @@ struct TaskPanelView: View {
                         TaskRow(
                             task: task,
                             isHovered: hoveredTaskId == task.id,
+                            isExpanded: !collapsedTaskIDs.contains(task.id),
                             onToggle: { manager.toggleCompleted(task) },
                             onDelete: { manager.delete(task) },
                             onRename: { manager.rename(task, to: $0) },
@@ -282,7 +292,11 @@ struct TaskPanelView: View {
                             onAddSubSubItem: { manager.addSubSubItem(to: task, subItem: $0, title: $1) },
                             onToggleSubSubItem: { manager.toggleSubSubItemCompleted(task: task, subItem: $0, subSubItem: $1) },
                             onDeleteSubSubItem: { manager.deleteSubSubItem(task: task, subItem: $0, subSubItem: $1) },
-                            onRenameSubSubItem: { manager.renameSubSubItem(task: task, subItem: $0, subSubItem: $1, to: $2) }
+                            onRenameSubSubItem: { manager.renameSubSubItem(task: task, subItem: $0, subSubItem: $1, to: $2) },
+                            onSetExpanded: { expanded in
+                                if expanded { collapsedTaskIDs.remove(task.id) }
+                                else { collapsedTaskIDs.insert(task.id) }
+                            }
                         ) { hoveredTaskId = $0 }
                     }
                 }
@@ -322,6 +336,9 @@ struct TaskPanelView: View {
 struct TaskRow: View {
     let task: TaskReminder
     let isHovered: Bool
+    /// Whether the sub-item list is showing. Owned by the panel so it outlives
+    /// the row being recycled by the `LazyVStack`.
+    let isExpanded: Bool
     let onToggle: () -> Void
     let onDelete: () -> Void
     let onRename: (String) -> Void
@@ -333,7 +350,38 @@ struct TaskRow: View {
     let onToggleSubSubItem: (TaskSubItem, TaskSubItem) -> Void
     let onDeleteSubSubItem: (TaskSubItem, TaskSubItem) -> Void
     let onRenameSubSubItem: (TaskSubItem, TaskSubItem, String) -> Void
+    let onSetExpanded: (Bool) -> Void
     let onHover: (UUID?) -> Void
+
+    /// Horizontal padding of the whole task row.
+    ///
+    /// Set to 0 so the disclosure chevron's leading edge lines up with the
+    /// leading edge of the search bar above the list.
+    private static let rowPadding: CGFloat = 0
+    /// Gap between disclosure, checkbox, and title column in `mainRow`.
+    private static let rowSpacing: CGFloat = 6
+    /// Width reserved for the expand/collapse arrow.
+    private static let disclosureWidth: CGFloat = 9
+    /// Visual size of the completion checkbox.
+    private static let checkButtonSize: CGFloat = 14
+
+    /// Left inset that puts the root task title — and root-level extras such as
+    /// the export status row — in one column.
+    ///
+    /// Derived rather than hard-coded so widening the arrow can't silently knock
+    /// the title out of line: row padding + arrow + gap + check-button + gap.
+    private static let contentColumnInset: CGFloat = rowPadding + disclosureWidth + rowSpacing + checkButtonSize + rowSpacing
+
+    /// The root completion checkbox's vertical center line, measured from the
+    /// row's leading edge.
+    ///
+    /// This line doubles as the task-tree spine: sub-item checkboxes are
+    /// centered on it, and the vertical guide line is drawn through it.
+    private static let checkboxCenter: CGFloat = rowPadding + disclosureWidth + rowSpacing + checkButtonSize / 2
+
+    /// Leading inset for sub-item rows so their checkboxes are centered on the
+    /// same vertical line as the root task's checkbox.
+    private static let subItemIndent: CGFloat = checkboxCenter - checkButtonSize / 2
 
     private static let relativeFormatter: RelativeDateTimeFormatter = {
         let f = RelativeDateTimeFormatter()
@@ -364,10 +412,11 @@ struct TaskRow: View {
             if let target = scheduleTarget { scheduleEditor(for: target) }
             if isAddingSubItem { subItemInputField }
             if let exportStatus { exportStatusRow(exportStatus) }
-            if !task.subitems.isEmpty { subItemsList }
+            if !task.subitems.isEmpty && isExpanded { subItemsList }
         }
-        .padding(.horizontal, 10)
+        .padding(.horizontal, Self.rowPadding)
         .padding(.vertical, 8)
+        .background(alignment: .topLeading) { treeGuideLine }
         .background {
             RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .fill(Color.primary.opacity(isHovered ? 0.06 : 0))
@@ -378,14 +427,19 @@ struct TaskRow: View {
         .animation(.easeOut(duration: 0.15), value: isAddingSubItem)
         .animation(.easeOut(duration: 0.15), value: scheduleTarget != nil)
         .animation(.easeOut(duration: 0.15), value: task.subitems.count)
+        .animation(.easeOut(duration: 0.18), value: isExpanded)
     }
 
     private var mainRow: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: Self.rowSpacing) {
+            disclosureControl
+
             Button(action: onToggle) {
-                Image(systemName: task.completed ? "checkmark.circle.fill" : "circle")
-                    .font(.system(size: 16))
+                Image(systemName: task.completed ? "checkmark.circle" : "circle")
+                    .font(.system(size: 13))
                     .foregroundStyle(task.completed ? Color.green : Color.secondary.opacity(0.6))
+                    .frame(width: Self.checkButtonSize, height: Self.checkButtonSize)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .accessibilityLabel(task.completed ? "标记为未完成" : "标记为已完成")
@@ -446,6 +500,34 @@ struct TaskRow: View {
                 }
                 .transition(.opacity)
             }
+        }
+    }
+
+    /// Expand/collapse affordance for the sub-item list.
+    ///
+    /// The slot is reserved on every task — childless ones draw an empty
+    /// placeholder — so the check-buttons stay in one column as lists open and
+    /// close, instead of every row shifting sideways.
+    ///
+    /// The arrow states the *action*, not the current state: pointing down means
+    /// "clicking opens the list below", pointing up means "clicking folds it
+    /// away". A state-indicator arrow would point down at a folded row, which
+    /// reads as "already open".
+    @ViewBuilder
+    private var disclosureControl: some View {
+        if task.subitems.isEmpty {
+            Color.clear.frame(width: Self.disclosureWidth, height: Self.checkButtonSize)
+        } else {
+            Button(action: { onSetExpanded(!isExpanded) }) {
+                Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(.secondary)
+                    .frame(width: Self.disclosureWidth, height: Self.checkButtonSize)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help(isExpanded ? "收起子项" : "展开子项")
+            .accessibilityLabel(isExpanded ? "收起子项" : "展开子项")
         }
     }
 
@@ -538,7 +620,7 @@ struct TaskRow: View {
                 .controlSize(.small)
                 .disabled(subItemInputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
         }
-        .padding(.leading, 26)
+        .padding(.leading, Self.subItemIndent)
         .padding(.vertical, 4)
     }
 
@@ -548,6 +630,8 @@ struct TaskRow: View {
         onAddSubItem(text)
         subItemInputText = ""
         isAddingSubItem = false
+        // A new sub-item must not land in a list the user has folded away.
+        if !isExpanded { onSetExpanded(true) }
     }
 
     private var subItemsList: some View {
@@ -567,7 +651,20 @@ struct TaskRow: View {
                 ) { hoveredSubItemId = $0 }
             }
         }
-        .padding(.leading, 26)
+        .padding(.leading, Self.subItemIndent)
+    }
+
+    /// A subtle vertical guide line that runs through the root checkbox center
+    /// for tasks whose sub-item list is currently expanded. Leaf tasks get no line.
+    @ViewBuilder
+    private var treeGuideLine: some View {
+        if !task.subitems.isEmpty && isExpanded {
+            Rectangle()
+                .fill(Color.secondary.opacity(0.15))
+                .frame(width: 1)
+                .frame(maxHeight: .infinity)
+                .padding(.leading, Self.checkboxCenter - 0.5)
+        }
     }
 
     private var timeString: String {
@@ -653,7 +750,7 @@ struct TaskRow: View {
                 Spacer(minLength: 0)
             }
         }
-        .padding(.leading, 26)
+        .padding(.leading, Self.contentColumnInset)
     }
 
     private func commitSchedule() {
@@ -720,7 +817,7 @@ struct TaskRow: View {
                     .fixedSize()
             }
         }
-        .padding(.leading, 26)
+        .padding(.leading, Self.contentColumnInset)
     }
 }
 
@@ -751,13 +848,20 @@ struct SubItemRow: View {
     @State private var titleDraft: String = ""
     @FocusState private var isTitleFocused: Bool
 
+    /// Visual size of the completion checkbox; kept in sync with TaskRow.
+    private static let checkButtonSize: CGFloat = 14
+    /// Horizontal gap inside the sub-item row HStack.
+    private static let rowSpacing: CGFloat = 6
+
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
-            HStack(spacing: 8) {
+            HStack(spacing: Self.rowSpacing) {
                 Button(action: onToggle) {
-                    Image(systemName: subItem.completed ? "checkmark.circle.fill" : "circle")
+                    Image(systemName: subItem.completed ? "checkmark.circle" : "circle")
                         .font(.system(size: 13))
                         .foregroundStyle(subItem.completed ? Color.green : Color.secondary.opacity(0.5))
+                        .frame(width: Self.checkButtonSize, height: Self.checkButtonSize)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel(subItem.completed ? "标记为未完成" : "标记为已完成")

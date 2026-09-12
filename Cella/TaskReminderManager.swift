@@ -79,26 +79,6 @@ struct TaskSubItem: Identifiable, Codable, Equatable {
         subSubItems = try container.decodeIfPresent([TaskSubItem].self, forKey: .subSubItems) ?? []
     }
 
-    /// Recursively applies a parent's completion state to this item and all of
-    /// its descendants.
-    ///
-    /// `stamp` is the parent's `completedAt`. Auto-completing records that stamp
-    /// on every item it touches; un-completing then clears *only* the items
-    /// carrying it. An item the user ticked off by hand beforehand holds its own,
-    /// different stamp and therefore stays done — which is why the reverse
-    /// direction is guarded rather than unconditional.
-    mutating func applyParentCompletion(completed: Bool, stamp: Date?) {
-        if completed {
-            self.completed = true
-            if self.completedAt == nil { self.completedAt = stamp }
-        } else if self.completedAt == stamp {
-            self.completed = false
-            self.completedAt = nil
-        }
-        for index in subSubItems.indices {
-            subSubItems[index].applyParentCompletion(completed: completed, stamp: stamp)
-        }
-    }
 }
 
 /// A deletion that is still recoverable, so the list can offer an undo.
@@ -204,8 +184,9 @@ enum TaskReminderSyncState: Equatable {
 /// Singleton manager for task reminders with iCloud sync.
 ///
 /// Tasks are persisted as JSON files, one per calendar day (e.g. `2026-09-05.json`).
-/// Marking a task complete only flips the `completed` flag — it never deletes
-/// the record. Data is only removed when the user explicitly deletes a task.
+/// Marking a task complete only flips that item's own `completed` flag; it never
+/// cascades to sub-items and never deletes the record. Data is only removed when
+/// the user explicitly deletes a task.
 ///
 /// **Storage.** `~/Documents/cella/task-note/`, which macOS replicates whenever
 /// iCloud Drive's "Desktop & Documents Folders" is on. That is the only location
@@ -397,22 +378,7 @@ final class TaskReminderManager: ObservableObject {
     func toggleCompleted(_ task: TaskReminder) {
         guard let index = tasks.firstIndex(where: { $0.id == task.id }) else { return }
         tasks[index].completed.toggle()
-        if tasks[index].completed {
-            // One shared timestamp lets the reverse operation tell the
-            // sub-items we auto-completed apart from ones the user ticked off
-            // by hand earlier.
-            let now = Date()
-            tasks[index].completedAt = now
-            for subIndex in tasks[index].subitems.indices {
-                tasks[index].subitems[subIndex].applyParentCompletion(completed: true, stamp: now)
-            }
-        } else {
-            let stamp = tasks[index].completedAt
-            tasks[index].completedAt = nil
-            for subIndex in tasks[index].subitems.indices {
-                tasks[index].subitems[subIndex].applyParentCompletion(completed: false, stamp: stamp)
-            }
-        }
+        tasks[index].completedAt = tasks[index].completed ? Date() : nil
         let updated = tasks[index]
         ioQueue.async { [weak self] in self?.saveTask(updated) }
     }
@@ -432,12 +398,8 @@ final class TaskReminderManager: ObservableObject {
     func toggleSubItemCompleted(task: TaskReminder, subItem: TaskSubItem) {
         guard let index = tasks.firstIndex(where: { $0.id == task.id }),
               let subIndex = tasks[index].subitems.firstIndex(where: { $0.id == subItem.id }) else { return }
-        let willComplete = !tasks[index].subitems[subIndex].completed
-        // Read the stamp *before* it is cleared: it identifies the third-level
-        // items this toggle auto-completes, so the reverse direction can put
-        // back exactly those and nothing else.
-        let stamp = willComplete ? Date() : tasks[index].subitems[subIndex].completedAt
-        tasks[index].subitems[subIndex].applyParentCompletion(completed: willComplete, stamp: stamp)
+        tasks[index].subitems[subIndex].completed.toggle()
+        tasks[index].subitems[subIndex].completedAt = tasks[index].subitems[subIndex].completed ? Date() : nil
         let updated = tasks[index]
         ioQueue.async { [weak self] in self?.saveTask(updated) }
     }
