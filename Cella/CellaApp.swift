@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import ServiceManagement
 
 @main
 struct CellaApp: App {
@@ -77,8 +78,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let menu = NSMenu()
         menu.addItem(withTitle: "关于层隅", action: #selector(showAbout), keyEquivalent: "")
         menu.addItem(NSMenuItem.separator())
+        let launchItem = menu.addItem(
+            withTitle: "开机启动",
+            action: #selector(toggleLaunchAtLogin(_:)),
+            keyEquivalent: ""
+        )
+        launchItem.state = LoginItem.isEnabled ? .on : .off
+        menu.addItem(NSMenuItem.separator())
         menu.addItem(withTitle: "退出层隅", action: #selector(quit), keyEquivalent: "q")
         NSMenu.popUpContextMenu(menu, with: event, for: button)
+    }
+
+    @objc private func toggleLaunchAtLogin(_ sender: NSMenuItem) {
+        LoginItem.setEnabled(!LoginItem.isEnabled)
+        sender.state = LoginItem.isEnabled ? .on : .off
     }
 
     @objc private func quit() {
@@ -134,6 +147,46 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         mainMenu.addItem(editMenuItem)
 
         NSApp.mainMenu = mainMenu
+    }
+}
+
+/// 开机启动（登录项）的注册与查询，包装 `SMAppService`。
+///
+/// 这是 `SMLoginItemSetEnabled` 的现代替代：不需要 helper 进程、不需要
+/// entitlement，对 Developer ID 直接签名的非沙盒 `LSUIElement` 应用开箱即用。
+/// 注册记录跟随 Cella 所在路径 —— 用户从 DMG 里直接运行时路径不稳定，
+/// 所以失败时提醒先安装到「应用程序」。
+enum LoginItem {
+    /// Cella 当前是否已注册为登录项。菜单每次右键弹出时重建，读到的是最新状态。
+    static var isEnabled: Bool {
+        SMAppService.mainApp.status == .enabled
+    }
+
+    static func setEnabled(_ enabled: Bool) {
+        let service = SMAppService.mainApp
+        do {
+            if enabled {
+                try service.register()
+            } else {
+                try service.unregister()
+            }
+        } catch {
+            let alert = NSAlert()
+            alert.messageText = "无法设置开机启动"
+            alert.informativeText = """
+                注册登录项失败：\(error.localizedDescription)
+
+                请确认 Cella 已安装到「应用程序」文件夹后再试。
+                """
+            alert.alertStyle = .warning
+            alert.addButton(withTitle: "好")
+            alert.runModal()
+        }
+
+        // 注册后仍待批准：把用户带到 系统设置 › 通用 › 登录项 完成确认。
+        if enabled, service.status == .requiresApproval {
+            SMAppService.openSystemSettingsLoginItems()
+        }
     }
 }
 
