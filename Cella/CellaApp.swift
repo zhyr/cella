@@ -197,6 +197,7 @@ final class PanelManager: NSObject, NSWindowDelegate {
     private var window: NSWindow?
     private var eventMonitor: Any?
     private var keyMonitor: Any?
+    private var dragMonitor: Any?
 
     init(statusItem: NSStatusItem) {
         self.statusItem = statusItem
@@ -244,6 +245,64 @@ final class PanelManager: NSObject, NSWindowDelegate {
         window.delegate = self
         self.window = window
         placeInitialWindow(window)
+        installHeaderDrag()
+    }
+
+    // MARK: - Header drag
+
+    /// Height of the header strip, matching `TaskPanelView.header`:
+    /// 12pt top inset + 22pt row, plus a few points of the gap above the input.
+    private static let headerDragHeight: CGFloat = 38
+    /// Trailing inset reserved for the close button (12pt padding + 22pt control).
+    private static let headerCloseWidth: CGFloat = 36
+
+    /// The hosting view swallows background drags, so the header is moved by
+    /// tracking the mouse ourselves. The close button stays clickable.
+    private func installHeaderDrag() {
+        guard dragMonitor == nil else { return }
+        dragMonitor = NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown) { [weak self] event in
+            guard let self, self.isHeaderDrag(event) else { return event }
+            self.dragPanel(from: event)
+            return nil
+        }
+    }
+
+    private func isHeaderDrag(_ event: NSEvent) -> Bool {
+        guard let window, event.window === window, window.isVisible,
+              let content = window.contentView else { return false }
+        let point = event.locationInWindow
+        let bounds = content.bounds
+        guard point.y >= bounds.maxY - Self.headerDragHeight, point.y <= bounds.maxY else { return false }
+        guard point.x >= bounds.minX, point.x <= bounds.maxX - Self.headerCloseWidth else { return false }
+        return true
+    }
+
+    private func dragPanel(from event: NSEvent) {
+        guard let window else { return }
+        let startMouse = NSEvent.mouseLocation
+        let startOrigin = window.frame.origin
+        window.trackEvents(
+            matching: [.leftMouseDragged, .leftMouseUp],
+            timeout: .greatestFiniteMagnitude,
+            mode: .eventTracking
+        ) { [weak window] next, stop in
+            guard let next else {
+                stop.pointee = true
+                return
+            }
+            switch next.type {
+            case .leftMouseUp:
+                stop.pointee = true
+            case .leftMouseDragged:
+                let mouse = NSEvent.mouseLocation
+                window?.setFrameOrigin(NSPoint(
+                    x: startOrigin.x + (mouse.x - startMouse.x),
+                    y: startOrigin.y + (mouse.y - startMouse.y)
+                ))
+            default:
+                break
+            }
+        }
     }
 
     // MARK: - Placement
@@ -363,10 +422,9 @@ final class TaskPanel: NSPanel {
         backgroundColor = .clear
         hasShadow = true
         level = .statusBar
-        // Borderless panel: there is no title bar to grab, so let the whole
-        // background work as a drag handle. AppKit still routes clicks that land
-        // on a control (text field, button) to that control first, so editing is
-        // unaffected.
+        // The SwiftUI hosting view fills this borderless panel, so AppKit never
+        // sees a bare background and `isMovableByWindowBackground` does not move
+        // the window. Header dragging is handled by `PanelManager`.
         isMovableByWindowBackground = true
         hidesOnDeactivate = false
         acceptsMouseMovedEvents = true
